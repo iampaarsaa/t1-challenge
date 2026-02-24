@@ -1,0 +1,158 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: grafana
+  strategy:
+    type: Recreate
+    recreateParams:
+      timeoutSeconds: "600"
+  template:
+    metadata:
+      labels:
+        app: grafana
+        name: grafana
+    spec:
+      securityContext:
+        fsGroup: 472
+        runAsGroup: 472
+        runAsUser: 472
+      containers:
+        - name: grafana
+          image: grafana/grafana:latest
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-secret
+                  key: admin-password
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              protocol: TCP
+              name: http
+          resources:
+            limits:
+              cpu: "1"
+              ephemeral-storage: 1G
+              memory: 2G
+            requests:
+              cpu: "1"
+              ephemeral-storage: 1G
+              memory: 2G
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - name: grafana-disk-axm13m
+              mountPath: /var/lib/grafana
+            - name: grafana-config
+              mountPath: /etc/grafana/grafana.ini
+              subPath: grafana.ini
+            - name: grafana-config
+              mountPath: /etc/grafana/provisioning/datasources/datasource.yaml
+              subPath: datasource.yaml
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/cloud-container-g2
+                    operator: In
+                    values:
+                      - "true"
+      volumes:
+        - name: grafana-disk-axm13m
+          persistentVolumeClaim:
+            claimName: grafana-disk-axm13m
+        - name: grafana-config
+          configMap:
+            name: grafana-config
+      tolerations:
+        - effect: NoSchedule
+          key: role
+          operator: Equal
+          value: cloud-container-g2
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: grafana
+  name: grafana
+spec:
+  ports:
+    - name: wfm81gsx
+      protocol: TCP
+      targetPort: 3000
+      port: 3000
+  selector:
+    app: grafana
+  type: ClusterIP
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  generation: 1
+  name: grafana-newingress
+  namespace: parsa-challenge
+spec:
+  rules:
+    - host: monit.iampaarsaa.ir
+      http:
+        paths:
+          - backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+            path: /
+            pathType: Prefix
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-disk-axm13m
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10G
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-secret
+type: Opaque
+data:
+  admin-password: "NTchNDQyI1doNkAyNyE5QA=="
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-config
+data:
+  grafana.ini: |
+    # Add your Grafana configuration here, for example:
+    [server]
+    root_url = http://monit.iampaarsaa.ir
+    [security]
+    # Additional security settings if needed
+  datasource.yaml: |
+    # Add your datasource configuration here, for example:
+    apiVersion: 1
+    datasources:
+      - name: Example
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true

@@ -1,0 +1,161 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 10s
+      evaluation_interval: 10s
+      external_labels:
+        monitor: monitoring
+
+    scrape_configs:
+      - job_name: "prometheus"
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      - job_name: "R1C - iampaarsaa.ir - Access"
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        authorization:
+          type: "apikey"
+          credentials_file: "/etc/prometheus/secrets/api-key"
+        metrics_path: "/cdn-metrics/v1/metrics/iampaarsaa.ir/id/be03de3b-b8b6-4784-bc99-dc6207219921"
+        static_configs:
+          - targets: ["napi.arvancloud.ir"]
+
+      - job_name: "node_exporter"
+        static_configs:
+          - targets:
+              - "185.239.107.2:9100"
+              - "185.239.106.130:9100"
+            labels:
+              role: "node"
+              env: "production"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: arvancloud-apikey
+data:
+  api-key: "YjJkOWRiMzYtZjY4MC01ODhmLWI1OWUtM2JmZjNhOTIxOTA2"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-disk-uj24t
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20G
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: prometheus
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      securityContext:
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:latest
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+          ports:
+            - name: http
+              containerPort: 9090
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2G
+              ephemeral-storage: 1G
+            limits:
+              cpu: "1"
+              memory: 2G
+              ephemeral-storage: 1G
+          volumeMounts:
+            - name: prometheus-data
+              mountPath: /prometheus
+            - name: prometheus-config
+              mountPath: /etc/prometheus/
+            - name: apikey-volume
+              mountPath: /etc/prometheus/secrets
+              readOnly: true
+      volumes:
+        - name: prometheus-data
+          persistentVolumeClaim:
+            claimName: prometheus-disk-uj24t
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: apikey-volume
+          secret:
+            secretName: arvancloud-apikey
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/cloud-container-g2
+                    operator: In
+                    values: ["true"]
+      tolerations:
+        - key: role
+          operator: Equal
+          value: cloud-container-g2
+          effect: NoSchedule
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    app: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+---
+kind: Ingress
+metadata:
+    generation: 1
+    name: prometheus-ingress
+spec:
+    ingressClassName: nginx
+    rules:
+        - host: prom.iampaarsaa.ir
+          http:
+              paths:
+                  - backend:
+                        service:
+                            name: prometheus
+                            port:
+                                number: 9090
+                    path: /
+                    pathType: Prefix
+---
